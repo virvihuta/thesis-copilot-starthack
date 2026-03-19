@@ -1,6 +1,8 @@
 import json
+import io
 from pydantic import BaseModel, Field
 from typing import List
+from PyPDF2 import PdfReader
 from langchain_openai import ChatOpenAI, OpenAIEmbeddings
 from langchain_chroma import Chroma
 from langchain_core.prompts import ChatPromptTemplate
@@ -9,60 +11,60 @@ from dotenv import load_dotenv
 load_dotenv()
 CHROMA_PATH = "./chroma_db"
 
+# --- UPDATED SCHEMA: Now includes Achievements for the "Wow" factor ---
 class StudentProfile(BaseModel):
-    extracted_skills: List[str] = Field(description="Hard skills like programming languages or tools.")
-    core_interests: List[str] = Field(description="Broad industries, topics, or academic fields.")
-    excluded_topics: List[str] = Field(description="Anything the student explicitly says they do NOT want to do.")
+    extracted_skills: List[str] = Field(description="Hard skills like Python, React, or SQL.")
+    core_interests: List[str] = Field(description="Industries like Biotech, FinTech, or Sustainability.")
+    notable_achievements: List[str] = Field(description="Awards, high GPA, specific internships, or leadership.")
+    excluded_topics: List[str] = Field(description="Topics the student wants to avoid.")
 
-# --- FUNCTION 1: EXTRACT & SEARCH (Returns Top 3) ---
-def search_projects(user_message: str):
-    print("LLM is extracting profile...")
+# --- NEW: PDF TEXT EXTRACTION ---
+def extract_text_from_pdf(file_bytes: bytes) -> str:
+    pdf_reader = PdfReader(io.BytesIO(file_bytes))
+    text = ""
+    for page in pdf_reader.pages:
+        text += page.extract_text() or ""
+    return text
+
+# --- CORE SEARCH LOGIC ---
+def search_projects(user_text: str):
     llm = ChatOpenAI(model="gpt-4o-mini", temperature=0)
     extractor = llm.with_structured_output(StudentProfile)
     
     prompt = ChatPromptTemplate.from_messages([
-        ("system", "You are an expert academic headhunter. Extract the student's skills, interests, and exclusions."),
+        ("system", "You are an expert academic headhunter. Extract the student's profile from their message or CV text."),
         ("human", "{message}")
     ])
     
-    profile: StudentProfile = (prompt | extractor).invoke({"message": user_message})
+    profile: StudentProfile = (prompt | extractor).invoke({"message": user_text})
     
-    print("Database is finding the top 3 matches...")
     vectorstore = Chroma(
         persist_directory=CHROMA_PATH, 
         embedding_function=OpenAIEmbeddings(model="text-embedding-3-small")
     )
     
     search_query = f"Skills: {', '.join(profile.extracted_skills)}. Interests: {', '.join(profile.core_interests)}"
-    
-    # CHANGE: Grab the top 3 matches instead of 1
-    retriever = vectorstore.as_retriever(search_kwargs={"k": 3}) 
-    docs = retriever.invoke(search_query)
-    
-    matches = [doc.metadata for doc in docs]
+    docs = vectorstore.as_retriever(search_kwargs={"k": 3}).invoke(search_query)
     
     return {
         "extracted_profile": profile.model_dump(),
-        "top_matches": matches
+        "top_matches": [doc.metadata for doc in docs]
     }
 
-# --- FUNCTION 2: GENERATE THE PITCH (Runs only when the user clicks a project) ---
+# --- PITCH GENERATION ---
 def generate_pitch(profile_dict: dict, selected_project: dict):
-    print(f"Drafting email for {selected_project.get('company_name')}...")
-    
     writer_llm = ChatOpenAI(model="gpt-4o-mini", temperature=0.7)
     
     pitch_prompt = ChatPromptTemplate.from_messages([
-        ("system", """You are an expert career advisor. Write a concise, professional cold email 
-        for this student to apply for the provided thesis project. 
-        Rules: Keep it under 150 words. Connect skills to the project. Sound academic."""),
+        ("system", """You are a high-end career coach. Write a concise, professional cold email.
+        Highlight the student's 'notable_achievements' and connect them to the thesis project.
+        Max 150 words."""),
         ("human", "Student Profile: {profile}\n\nThesis Project: {project}")
     ])
     
-    pitch_chain = pitch_prompt | writer_llm
-    pitch_response = pitch_chain.invoke({
+    response = (pitch_prompt | writer_llm).invoke({
         "profile": json.dumps(profile_dict),
         "project": json.dumps(selected_project)
     })
     
-    return {"generated_pitch": pitch_response.content}
+    return {"generated_pitch": response.content}

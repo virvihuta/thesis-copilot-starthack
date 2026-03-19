@@ -24,11 +24,11 @@ class DraftRequest(BaseModel):
 # ENDPOINT 1: The Search
 @app.post("/api/search")
 async def handle_search(request: ChatRequest):
-    print("🌐 API Received a search request.")
+    print("API Received a search request.")
     return search_projects(request.message)
 
 # ENDPOINT 2: The Email Drafter
 @app.post("/api/draft")
 async def handle_draft(request: DraftRequest):
-    print("🌐 API Received a draft request.")
+    print("API Received a draft request.")
     return generate_pitch(request.profile, request.selected_project)
