@@ -1,19 +1,17 @@
-from fastapi import FastAPI
+from fastapi import FastAPI, UploadFile, File
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
-from agent import search_projects, generate_pitch
+from agent import search_projects, generate_pitch, extract_text_from_pdf
 
 app = FastAPI(title="Studyond AI Copilot API")
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"], 
-    allow_credentials=True,
+    allow_origins=["*"],
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
-# Data structures expected from the frontend
 class ChatRequest(BaseModel):
     message: str
 
@@ -21,14 +19,17 @@ class DraftRequest(BaseModel):
     profile: dict
     selected_project: dict
 
-# ENDPOINT 1: The Search
 @app.post("/api/search")
 async def handle_search(request: ChatRequest):
-    print("API Received a search request.")
     return search_projects(request.message)
 
-# ENDPOINT 2: The Email Drafter
+@app.post("/api/upload-cv")
+async def handle_cv_upload(file: UploadFile = File(...)):
+    # Read PDF, extract text, and run the search pipeline
+    content = await file.read()
+    text = extract_text_from_pdf(content)
+    return search_projects(text)
+
 @app.post("/api/draft")
 async def handle_draft(request: DraftRequest):
-    print("API Received a draft request.")
     return generate_pitch(request.profile, request.selected_project)
