@@ -1,3 +1,10 @@
+// src/components/CVUploadCard.tsx
+// 
+// CHANGE FROM ORIGINAL:
+// The onUpload prop now receives the actual File object (or undefined for drag-drop).
+// This lets ThesisCopilot.tsx send the real PDF to the backend.
+// Previously onUpload() had no arguments — so the file was lost.
+
 import { useRef, useState, useCallback } from 'react'
 import { Upload } from 'lucide-react'
 
@@ -13,7 +20,7 @@ const aiGradient = {
 } as const
 
 interface Props {
-  onUpload: () => void
+  onUpload: (file?: File) => void  // ← CHANGED: now passes the file up
   uploaded: boolean
   keywords: string[]
 }
@@ -26,10 +33,17 @@ export function CVUploadCard({ onUpload, uploaded, keywords }: Props) {
     (e: React.DragEvent) => {
       e.preventDefault()
       setDragging(false)
-      onUpload()
+      // Try to get the dropped file
+      const file = e.dataTransfer.files?.[0]
+      onUpload(file)  // ← CHANGED: pass file (or undefined if not accessible)
     },
     [onUpload]
   )
+
+  function handleFileChange(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0]
+    onUpload(file)  // ← CHANGED: pass the selected file
+  }
 
   return (
     <div
@@ -69,7 +83,7 @@ export function CVUploadCard({ onUpload, uploaded, keywords }: Props) {
             type="file"
             className="hidden"
             accept=".pdf,.doc,.docx"
-            onChange={onUpload}
+            onChange={handleFileChange}  // ← CHANGED: use local handler instead of onUpload directly
           />
         </button>
       ) : (
