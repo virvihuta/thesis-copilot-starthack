@@ -49,7 +49,7 @@ async def health():
 
 @app.post("/save-profile")
 async def save_profile(profile: ProfileData):
-    user_session["current_user"] = profile.dict()
+    user_session["current_user"] = profile.model_dump() # Updated to model_dump() for Pydantic v2
     return {"message": "Profile saved", "user": user_session["current_user"]}
 
 @app.post("/find-matches")
@@ -63,7 +63,7 @@ async def find_matches(query: SearchRequest):
                 "id": doc.metadata.get("topic_id"),
                 "title": doc.metadata.get("title"),
                 "company": doc.metadata.get("company_name"),
-                "expert": doc.metadata.get("expert_names"),
+                "expert": doc.metadata.get("expert_names", "Hiring Manager"),
                 "snippet": doc.page_content[:200]
             })
         return matches
@@ -78,13 +78,14 @@ async def generate_pitch(request: PitchRequest):
         return {"pitch": "Dear Expert, I'm interested in your project. I have the skills you need. Best, Student."}
 
     try:
-        # 1. Get Topic from DB
-        # Use a similarity search with k=1 to find the specific ID if .get() fails
-        results = db.similarity_search(request.topic_id, k=1)
-        if not results:
-             raise HTTPException(status_code=404, detail="Topic not found")
+        # 1. Get exact topic from DB using its ID
+        topic_data = db.get(ids=[request.topic_id])
         
-        meta = results[0].metadata
+        # Check if the data exists and has metadata
+        if not topic_data or not topic_data.get('metadatas') or len(topic_data['metadatas']) == 0:
+             raise HTTPException(status_code=404, detail="Topic not found in database")
+        
+        meta = topic_data['metadatas'][0]
         
         # 2. Get User from Session (Block 4)
         user = user_session.get("current_user", {"full_name": "Student", "skills": "research"})
@@ -92,7 +93,7 @@ async def generate_pitch(request: PitchRequest):
         # 3. Generate Pitch
         prompt = f"""
         Write a professional 3-sentence cold email from {user['full_name']} 
-        to {meta.get('expert_names')} at {meta.get('company_name')} 
+        to {meta.get('expert_names', 'Hiring Manager')} at {meta.get('company_name', 'the company')} 
         about the thesis: {meta.get('title')}.
         Mention these student skills: {user['skills']}.
         """
@@ -103,6 +104,8 @@ async def generate_pitch(request: PitchRequest):
         )
         
         return {"pitch": response.choices[0].message.content}
+    except HTTPException:
+        raise
     except Exception as e:
         print(f"Pitch Error: {e}")
         raise HTTPException(status_code=500, detail="Pitch generation failed")
