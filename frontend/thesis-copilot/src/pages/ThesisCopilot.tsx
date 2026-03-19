@@ -1,7 +1,10 @@
 import { useState } from 'react'
 import { Sparkles } from 'lucide-react'
 import type { Match } from '../types/thesis'
-import { MOCK_MATCHES } from '../data/mockMatches'
+
+// 1. ADDED: Import the live API service. REMOVED: mockMatches.
+import { apiService } from '../api/apiService' 
+
 import { Sidebar } from '../components/Sidebar'
 import { CVUploadCard } from '../components/CVUploadCard'
 import { MemoryDumpCard } from '../components/MemoryDumpCard'
@@ -27,15 +30,28 @@ export function ThesisCopilot() {
     setCvUploaded(true)
   }
 
-  function handleFindMatches() {
+  // 2. UPDATED: Made this async and connected it to the AI Engine
+  async function handleFindMatches() {
     if (!readyToSearch) return
+    
     setLoading(true)
     setMatches([])
     setActiveMatch(null)
-    setTimeout(() => {
-      setMatches(MOCK_MATCHES)
+    
+    try {
+      // If they upload a CV but leave text blank, give the AI a hint based on your profile
+      const searchQuery = memoryText.trim() || "Data Science and Machine Learning student looking for a thesis"
+      
+      // Call the Python FastAPI backend
+      const liveResults = await apiService.findMatches(searchQuery)
+      
+      setMatches(liveResults)
+    } catch (error) {
+      console.error("AI Engine Error:", error)
+      alert("Oops! Make sure the Python backend is running on port 8000.")
+    } finally {
       setLoading(false)
-    }, 1400)
+    }
   }
 
   function handleMatchClick(match: Match) {
