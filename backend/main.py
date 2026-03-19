@@ -26,7 +26,7 @@ app.add_middleware(
  
 # ─── DATABASE ────────────────────────────────────────────────────────────────
 # Point this at your chroma_db folder. Make sure ingest.py has already been run.
-CHROMA_PATH = "./chroma_db"
+CHROMA_PATH = "/Users/user/Desktop/thesis-copilot-starthack/ai_engine/chroma_db"
 embeddings = OpenAIEmbeddings(model="text-embedding-3-small")
 db = Chroma(persist_directory=CHROMA_PATH, embedding_function=embeddings)
  
