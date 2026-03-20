@@ -153,7 +153,7 @@ async def upload_cv(file: UploadFile = File(...)):
 
         # Use GPT to extract real skills from the CV
         kw_response = openai_client.chat.completions.create(
-            model="gpt-4o-mini",
+            model="gpt-5.1",
             messages=[{
                 "role": "user",
                 "content": f"""Extract exactly 5 technical skills, tools, or domain areas from this CV.
