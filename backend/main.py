@@ -57,6 +57,17 @@ class SearchRequest(BaseModel):
 class PitchRequest(BaseModel):
     topic_id: str  # This is the topic_id stored in Chroma metadata, NOT the Chroma UUID
 
+class SupervisorRequest(BaseModel):
+    topic_title: str
+    topic_description: str
+    exclude_name: str = ""  # optional — skip this supervisor to get the next best
+
+class SupervisorPitchRequest(BaseModel):
+    supervisor_name: str
+    supervisor_email: str
+    supervisor_interests: str
+    topic_title: str
+
 
 # ─── ENDPOINTS ───────────────────────────────────────────────────────────────
 
@@ -94,7 +105,11 @@ async def find_matches(query: SearchRequest):
     and returns the top 3 matching thesis topics.
     """
     try:
-        results = db.similarity_search_with_score(query.text, k=3)
+        results = db.similarity_search_with_score(
+            query.text,
+            k=3,
+            filter={"doc_type": "topic"}
+        )
 
         matches = []
         for doc, score in results:
@@ -137,7 +152,11 @@ async def upload_cv(file: UploadFile = File(...)):
             raise HTTPException(status_code=400, detail="Could not extract text from PDF.")
 
         # Reuse the same search logic — treat the CV text as the search query
-        results = db.similarity_search_with_score(text[:2000], k=3)
+        results = db.similarity_search_with_score(
+            text[:2000],
+            k=3,
+            filter={"doc_type": "topic"}
+        )
 
         matches = []
         for doc, score in results:
@@ -153,7 +172,7 @@ async def upload_cv(file: UploadFile = File(...)):
 
         # Use GPT to extract real skills from the CV
         kw_response = openai_client.chat.completions.create(
-            model="gpt-5.1",
+            model="gpt-4o-mini",
             messages=[{
                 "role": "user",
                 "content": f"""Extract exactly 5 technical skills, tools, or domain areas from this CV.
@@ -181,6 +200,91 @@ CV text:
     except Exception as e:
         print(f"[CV Upload Error] {e}")
         raise HTTPException(status_code=500, detail=f"CV processing failed: {str(e)}")
+
+
+@app.post("/find-supervisor")
+async def find_supervisor(request: SupervisorRequest):
+    """
+    Finds the best matching supervisor for a given thesis topic.
+    Searches ChromaDB for supervisor documents that semantically match
+    the topic title and description.
+    """
+    try:
+        # Search only among supervisor documents using a metadata filter
+        search_query = f"{request.topic_title}. {request.topic_description}"
+        results = db.similarity_search_with_score(
+            search_query,
+            k=5,
+            filter={"doc_type": "supervisor"}
+        )
+
+        if not results:
+            return {"supervisor": None}
+
+        # Skip the excluded supervisor if one was provided
+        for doc, score in results:
+            full_name = doc.metadata.get("full_name", "")
+            if full_name == request.exclude_name:
+                continue
+            similarity = max(60, min(99, round(100 - (score * 35))))
+            return {
+                "supervisor": {
+                    "full_name": full_name,
+                    "email": doc.metadata.get("email", ""),
+                    "interests": doc.metadata.get("interests", ""),
+                    "score": similarity,
+                }
+            }
+
+        return {"supervisor": None}
+
+    except Exception as e:
+        print(f"[Supervisor Search Error] {e}")
+        raise HTTPException(status_code=500, detail=f"Supervisor search failed: {str(e)}")
+
+
+@app.post("/generate-supervisor-pitch")
+async def generate_supervisor_pitch(request: SupervisorPitchRequest):
+    """
+    Generates a personalized cold email to a supervisor asking them
+    to supervise the student's thesis on the selected topic.
+    """
+    user = user_session.get("current_user", {
+        "full_name": "Student",
+        "skills": "research and analytical thinking",
+        "interests": "innovation and applied research",
+    })
+
+    prompt = f"""You are a professional academic career coach helping a student write a cold email to a professor.
+
+Write a concise, confident, professional cold email (max 150 words) from {user['full_name']}
+to {request.supervisor_name} asking them to supervise a thesis on: "{request.topic_title}".
+
+The professor's research interests: {request.supervisor_interests}
+
+The student's skills: {user['skills']}
+The student's interests: {user['interests']}
+
+Rules:
+- Address the professor by their title and last name (e.g. "Dear Prof. Vechev")
+- Mention 1-2 specific research interests of theirs that connect to the thesis topic
+- Be direct about asking for supervision
+- End with a clear call to action (brief meeting or call)
+- Do NOT use buzzwords like "synergy" or "leverage"
+- Do NOT write a subject line, just the email body
+"""
+
+    try:
+        response = openai_client.chat.completions.create(
+            model="gpt-4o-mini",
+            messages=[{"role": "user", "content": prompt}],
+            max_completion_tokens=300,
+            temperature=0.7,
+        )
+        return {"pitch": response.choices[0].message.content}
+    except Exception as e:
+        print(f"[Supervisor Pitch Error] {e}")
+        raise HTTPException(status_code=500, detail=f"AI generation failed: {str(e)}")
 
 
 @app.post("/generate-pitch")

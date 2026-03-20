@@ -1,8 +1,9 @@
 import { useState, useEffect } from 'react'
-import { X, Building2, Sparkles } from 'lucide-react'
+import { X, Building2, Sparkles, GraduationCap, Copy, Check } from 'lucide-react'
 import type { Match } from '../types/thesis'
 import { MatchScoreBadge } from './ui/MatchScoreBadge'
 import { useTypewriter } from '../hooks/useTypewriter'
+import { apiService } from '../api/apiService'
 
 const aiGradient = {
   background: 'linear-gradient(135deg, #7c3aed 0%, #2563eb 60%, #7c3aed 100%)',
@@ -15,42 +16,105 @@ const aiTextStyle = {
   backgroundClip: 'text',
 } as const
 
+interface Supervisor {
+  full_name: string
+  email: string
+  interests: string
+  score: number
+}
+
 interface Props {
   match: Match
   onClose: () => void
 }
 
+type DraftMode = 'company' | 'supervisor'
+
 export function ActionDrawer({ match, onClose }: Props) {
   const [generating, setGenerating] = useState(false)
   const [draftText, setDraftText] = useState('')
+  const [draftMode, setDraftMode] = useState<DraftMode>('company')
+  const [error, setError] = useState<string | null>(null)
+  const [supervisor, setSupervisor] = useState<Supervisor | null>(null)
+  const [loadingSupervisor, setLoadingSupervisor] = useState(true)
+  const [copied, setCopied] = useState(false)
+  const [excludedSupervisors, setExcludedSupervisors] = useState<string[]>([])
 
-  const proposalBody = `Subject: Application for "${match.title}" — Thesis Collaboration
-
-Dear ${match.contact.split('·')[0].trim()},
-
-My name is Virvi, and I am currently pursuing my studies with a specialisation in Machine Learning and Data Engineering. Having come across your project "${match.title}" at ${match.company}, I am writing to express my strong interest in contributing to this initiative.
-
-${match.matchReason}. The intersection of ${match.tags.join(', ')} aligns precisely with the research direction I wish to pursue in my thesis.
-
-I would be delighted to arrange a brief call to discuss how my background could serve the project's goals.
-
-Kind regards,
-Virvi`
-
-  const { displayed } = useTypewriter(generating ? proposalBody : '', 12)
-
+  // Load best supervisor when drawer opens
   useEffect(() => {
-    if (generating && displayed === proposalBody) {
-      setTimeout(() => {
-        setDraftText(proposalBody)
-        setGenerating(false)
-      }, 0)
-    }
-  }, [displayed, generating, proposalBody])
-
-  function handleGenerate() {
+    setLoadingSupervisor(true)
+    setSupervisor(null)
     setDraftText('')
+    setExcludedSupervisors([])
+    apiService.findSupervisor(match.title, match.summary)
+      .then((data) => setSupervisor(data.supervisor))
+      .catch(() => setSupervisor(null))
+      .finally(() => setLoadingSupervisor(false))
+  }, [match.id])
+
+  async function handleTryAnother() {
+    if (!supervisor) return
+    const newExcluded = [...excludedSupervisors, supervisor.full_name]
+    setExcludedSupervisors(newExcluded)
+    setLoadingSupervisor(true)
+    setSupervisor(null)
+    try {
+      // Try each excluded name — pass the last excluded one to skip it
+      const data = await apiService.findSupervisor(match.title, match.summary, newExcluded[newExcluded.length - 1])
+      setSupervisor(data.supervisor)
+    } catch {
+      setSupervisor(null)
+    } finally {
+      setLoadingSupervisor(false)
+    }
+  }
+
+  const { displayed } = useTypewriter(generating ? draftText : '', 8)
+
+  async function handleGenerateCompanyPitch() {
+    setDraftText('')
+    setDraftMode('company')
+    setError(null)
     setGenerating(true)
+    try {
+      const result = await apiService.generatePitch(match.id)
+      setDraftText(result.pitch)
+    } catch (err) {
+      setError('Could not generate pitch. Make sure the backend is running.')
+      setGenerating(false)
+    }
+  }
+
+  async function handleGenerateSupervisorPitch() {
+    if (!supervisor) return
+    setDraftText('')
+    setDraftMode('supervisor')
+    setError(null)
+    setGenerating(true)
+    try {
+      const result = await apiService.generateSupervisorPitch(
+        supervisor.full_name,
+        supervisor.email,
+        supervisor.interests,
+        match.title
+      )
+      setDraftText(result.pitch)
+    } catch (err) {
+      setError('Could not generate supervisor email. Make sure the backend is running.')
+      setGenerating(false)
+    }
+  }
+
+  function handleCopyEmail() {
+    if (!supervisor?.email) return
+    navigator.clipboard.writeText(supervisor.email)
+    setCopied(true)
+    setTimeout(() => setCopied(false), 2000)
+  }
+
+  const isTyping = generating && displayed.length < draftText.length
+  if (generating && !isTyping && draftText) {
+    setTimeout(() => setGenerating(false), 100)
   }
 
   return (
@@ -127,6 +191,75 @@ Virvi`
           Contact:{' '}
           <span style={aiTextStyle}>{match.contact}</span>
         </p>
+
+        {/* Recommended Supervisor */}
+        <div
+          className="mt-4 rounded-xl p-3"
+          style={{ backgroundColor: 'var(--secondary)', border: '1px solid var(--border)' }}
+        >
+          <div className="flex items-center gap-2 mb-2">
+            <GraduationCap size={14} style={{ color: '#7c3aed' }} />
+            <span className="ds-caption font-semibold" style={{ color: 'var(--foreground)' }}>
+              Recommended Supervisor
+            </span>
+          </div>
+
+          {loadingSupervisor ? (
+            <div className="h-4 w-40 animate-pulse rounded" style={{ backgroundColor: 'var(--border)' }} />
+          ) : supervisor ? (
+            <>
+              <p className="ds-caption font-medium" style={aiTextStyle}>
+                {supervisor.full_name}
+              </p>
+              <p className="ds-caption mt-0.5" style={{ color: 'var(--muted-foreground)' }}>
+                {supervisor.interests}
+              </p>
+              <div className="mt-2 flex items-center gap-2">
+                <p className="ds-caption flex-1" style={{ color: 'var(--muted-foreground)' }}>
+                  {supervisor.email}
+                </p>
+                <button
+                  className="flex items-center gap-1 rounded-lg px-2 py-1 ds-caption transition-all duration-150"
+                  style={{
+                    backgroundColor: copied ? 'rgba(124,58,237,0.1)' : 'var(--border)',
+                    color: copied ? '#7c3aed' : 'var(--muted-foreground)',
+                  }}
+                  onClick={handleCopyEmail}
+                >
+                  {copied ? <Check size={11} /> : <Copy size={11} />}
+                  {copied ? 'Copied!' : 'Copy'}
+                </button>
+              </div>
+          <div className="mt-2 flex items-center justify-between">
+                <p className="ds-caption" style={{ color: '#7c3aed' }}>
+                  {supervisor.score}% match
+                </p>
+                <button
+                  className="ds-caption transition-opacity hover:opacity-70"
+                  style={{ color: 'var(--muted-foreground)' }}
+                  onClick={handleTryAnother}
+                >
+                  Try another →
+                </button>
+              </div>
+
+              {/* Email supervisor button */}
+              <button
+                className="mt-3 flex w-full items-center justify-center gap-2 rounded-xl py-2 ds-caption transition-opacity duration-150 hover:opacity-90 disabled:opacity-40"
+                style={{ ...aiGradient, color: '#fff' }}
+                onClick={handleGenerateSupervisorPitch}
+                disabled={generating}
+              >
+                <Sparkles size={13} />
+                {generating && draftMode === 'supervisor' ? 'Generating…' : 'Email Supervisor'}
+              </button>
+            </>
+          ) : (
+            <p className="ds-caption" style={{ color: 'var(--muted-foreground)' }}>
+              No supervisor found
+            </p>
+          )}
+        </div>
       </div>
 
       {/* Draft Creator */}
@@ -138,29 +271,38 @@ Virvi`
           Draft Creator
         </p>
 
-        {(generating || draftText) && (
-          <textarea
-            className="mb-3 h-52 w-full resize-none rounded-xl p-3 ds-caption leading-relaxed outline-none"
-            style={{
-              backgroundColor: 'var(--secondary)',
-              color: 'var(--foreground)',
-              border: '1px solid var(--border)',
-              fontFamily: '"Courier New", monospace',
-            }}
-            value={generating ? displayed : draftText}
-            onChange={(e) => setDraftText(e.target.value)}
-            readOnly={generating}
-          />
+        {error && (
+          <p className="mb-3 ds-caption" style={{ color: '#ef4444' }}>{error}</p>
+        )}
+
+        {draftText && (
+          <>
+            <p className="ds-caption mb-2" style={{ color: 'var(--muted-foreground)' }}>
+              {draftMode === 'supervisor' ? '✉️ Email to supervisor' : '✉️ Email to company'}
+            </p>
+            <textarea
+              className="mb-3 h-52 w-full resize-none rounded-xl p-3 ds-caption leading-relaxed outline-none"
+              style={{
+                backgroundColor: 'var(--secondary)',
+                color: 'var(--foreground)',
+                border: '1px solid var(--border)',
+                fontFamily: '"Courier New", monospace',
+              }}
+              value={isTyping ? displayed : draftText}
+              onChange={(e) => setDraftText(e.target.value)}
+              readOnly={isTyping}
+            />
+          </>
         )}
 
         <button
           className="flex w-full items-center justify-center gap-2 rounded-xl py-3 ds-label transition-opacity duration-150 hover:opacity-90 active:opacity-80"
           style={{ ...aiGradient, color: '#fff' }}
-          onClick={handleGenerate}
+          onClick={handleGenerateCompanyPitch}
           disabled={generating}
         >
           <Sparkles size={15} />
-          {generating ? 'Generating…' : draftText ? 'Regenerate Proposal' : 'Generate AI Proposal'}
+          {generating && draftMode === 'company' ? 'Generating…' : draftText && draftMode === 'company' ? 'Regenerate Company Email' : 'Generate AI Proposal'}
         </button>
       </div>
     </aside>

@@ -120,6 +120,42 @@ export const apiService = {
     };
   },
 
+  // ── Find the best supervisor for a selected topic ────────────────────────
+  findSupervisor: async (topicTitle: string, topicDescription: string, excludeName: string = "") => {
+    const res = await fetch(`${BASE_URL}/find-supervisor`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        topic_title: topicTitle,
+        topic_description: topicDescription,
+        exclude_name: excludeName,
+      }),
+    });
+    if (!res.ok) throw new Error(`Supervisor search failed (${res.status})`);
+    return res.json();
+  },
+
+  // ── Generate a cold email to a supervisor asking for thesis supervision ──
+  generateSupervisorPitch: async (
+    supervisorName: string,
+    supervisorEmail: string,
+    supervisorInterests: string,
+    topicTitle: string
+  ) => {
+    const res = await fetch(`${BASE_URL}/generate-supervisor-pitch`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        supervisor_name: supervisorName,
+        supervisor_email: supervisorEmail,
+        supervisor_interests: supervisorInterests,
+        topic_title: topicTitle,
+      }),
+    });
+    if (!res.ok) throw new Error(`Supervisor pitch failed (${res.status})`);
+    return res.json(); // returns { pitch: "..." }
+  },
+
   // ── Generate a cold-email pitch for a selected topic ─────────────────────
   // Sends the topic ID to the backend, which fetches the topic details
   // and uses the saved student profile to write a personalized email.
